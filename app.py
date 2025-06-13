@@ -5,13 +5,11 @@ import json
 import time
 
 # To musi być pierwsza instrukcja Streamlit w całym skrypcie!
-st.set_page_config(page_title="Inteligentny Monitoring Temperatury", layout="centered")
+st.set_page_config(page_title="Inteligentny Monitoring Temperatury", layout="centered", icon="🌡️")
 
 # --- 1. Konfiguracja MQTT z zmiennych środowiskowych ---
-# Te zmienne zostaną automatycznie wypełnione wartościami z Streamlit Secrets
-# jeśli je tam ustawiono.
 MQTT_BROKER = os.getenv("MQTT_BROKER")
-MQTT_PORT = int(os.getenv("MQTT_PORT", 8883)) # Upewnij się, że to 8883 dla SSL
+MQTT_PORT = int(os.getenv("MQTT_PORT", 8883))
 MQTT_USERNAME = os.getenv("MQTT_USERNAME")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 MQTT_TOPIC = "home/monitor/data" # Temat, na który ESP32 wysyła JSON
@@ -24,7 +22,7 @@ if 'latest_data' not in st.session_state:
         "alarm": "Łączę..."
     }
     st.session_state.last_update_time = "N/A"
-    st.session_state.mqtt_error = None # DODAJ TĘ LINIĘ
+    st.session_state.mqtt_error = None # Dodaj tę linię
 
 # --- 3. Funkcje MQTT Callback ---
 def on_connect(client, userdata, flags, rc):
@@ -42,14 +40,16 @@ def on_message(client, userdata, msg):
         data = json.loads(payload_str)
         print(f"Odebrano MQTT: {data}")
         
-        # Aktualizuj stan sesji Streamlit
+        # Aktualizuj stan sesji Streamlit - BEZ st.rerun() TUTAJ
         st.session_state.latest_data["temp"] = data.get("temp", st.session_state.latest_data["temp"])
         st.session_state.latest_data["hum"] = data.get("hum", st.session_state.latest_data["hum"])
         st.session_state.latest_data["alarm"] = data.get("alarm", st.session_state.latest_data["alarm"])
         st.session_state.last_update_time = time.strftime("%H:%M:%S")
 
-        st.rerun() # Wymusza ponowne uruchomienie skryptu i odświeżenie UI
-
+        # WAŻNE: Nie wywołujemy st.rerun() bezpośrednio z callbacku MQTT.
+        # Streamlit sam odświeży UI, gdy st.session_state się zmieni,
+        # lub użytkownik naciśnie przycisk "Odśwież stronę".
+        
     except json.JSONDecodeError:
         print(f"Błąd parsowania JSON z MQTT: {msg.payload}")
     except Exception as e:
@@ -122,4 +122,6 @@ st.markdown("""
 st.subheader("Sterowanie symulacją (Wokwi)")
 st.write("Zmień temperaturę w symulacji Wokwi (DHT22), aby zobaczyć aktualizacje tutaj.")
 
-st.button("Odśwież stronę")
+# Przycisk "Odśwież stronę" jest teraz ważniejszy, ponieważ nie ma automatycznego st.rerun() z callbacku
+if st.button("Odśwież stronę"):
+    st.rerun() # Ten rerun jest bezpieczny, bo wywołuje go użytkownik
