@@ -133,8 +133,6 @@ st.markdown("""
     Wszelkie dane są przesyłane bezpiecznie za pomocą protokołu MQTT z uwierzytelnieniem.
     """)
 
-st.subheader("Sterowanie symulacją (Wokwi)")
-st.write("Zmień temperaturę w symulacji Wokwi (DHT22), aby zobaczyć aktualizacje tutaj.")
 
 
 time.sleep(1) # Odświeżanie co 1 sekundę
