@@ -10,7 +10,7 @@ st.set_page_config(page_title="Inteligentny Monitoring Temperatury", layout="cen
 
 # --- 1. Konfiguracja MQTT z zmiennych środowiskowych ---
 MQTT_BROKER = os.getenv("MQTT_BROKER")
-MQTT_PORT = int(os.getenv("MQTT_PORT", 8883))
+MQTT_PORT = int(os.getenv("MQTT_PORT", 8883)) # Upewnij się, że to 8883 dla SSL
 MQTT_USERNAME = os.getenv("MQTT_USERNAME")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 MQTT_TOPIC = "home/monitor/data" # Temat, na który ESP32 wysyła JSON
@@ -26,8 +26,14 @@ if 'latest_data' not in st.session_state:
     st.session_state.mqtt_error = None
 
 # Utwórz kolejkę do przekazywania danych z wątku MQTT do głównego wątku Streamlit
-if 'mqtt_queue' not in st.session_state:
-    st.session_state.mqtt_queue = queue.Queue() # DODAJ KOLEJKĘ DO SESSION_STATE
+# Kolejka powinna być zainicjalizowana poza st.session_state, jako zasób globalny
+# zarządzany przez @st.cache_resource, lub w funkcji @st.cache_resource
+# Upewnij się, że jest to ten sam obiekt kolejki, do którego dodają callbacki MQTT
+@st.cache_resource
+def get_mqtt_queue():
+    return queue.Queue()
+
+mqtt_data_queue = get_mqtt_queue() # Inicjalizacja kolejki
 
 # --- 3. Funkcje MQTT Callback ---
 def on_connect(client, userdata, flags, rc):
@@ -41,14 +47,10 @@ def on_message(client, userdata, msg):
     try:
         payload_str = msg.payload.decode('utf-8')
         data = json.loads(payload_str)
-        print(f"Odebrano MQTT: {data}")
+        print(f"Odebrano MQTT i dodaję do kolejki: {data}")
         
         # Włóż odebrane dane do kolejki
-        # Sprawdzamy, czy kolejka istnieje, zanim do niej dodamy (dla bezpieczeństwa wątków)
-        if 'mqtt_queue' in st.session_state:
-            st.session_state.mqtt_queue.put(data) # Wstaw dane do kolejki
-        else:
-            print("Kolejka MQTT nie zainicjalizowana w session_state. Nie mogę dodać danych.")
+        mqtt_data_queue.put(data) # Używamy globalnego obiektu kolejki
         
     except json.JSONDecodeError:
         print(f"Błąd parsowania JSON z MQTT: {msg.payload}")
@@ -65,43 +67,51 @@ def get_mqtt_client():
         
     client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
     client.on_connect = on_connect
-    client.on_message = on_message
+    client.on_message = on_message # Ustaw callback dla odebranych wiadomości
     
-    client.tls_set()
+    client.tls_set() # Użyj domyślnych certyfikatów systemowych
     
     try:
         client.connect(MQTT_BROKER, MQTT_PORT, 60)
-        client.loop_start()
+        client.loop_start() # Uruchom pętlę w tle do nasłuchiwania
         print("MQTT client started in background loop.")
-        st.session_state.mqtt_error = None
+        st.session_state.mqtt_error = None # Zresetuj błąd, jeśli połączenie się powiodło
     except Exception as e:
         st.session_state.mqtt_error = f"Nie udało się połączyć z brokerem MQTT: {e}. Sprawdź konfigurację."
         print(f"Błąd połączenia MQTT w get_mqtt_client: {e}")
     return client
 
-mqtt_client = get_mqtt_client()
+mqtt_client = get_mqtt_client() # Inicjalizacja klienta MQTT
+
 
 # --- 5. Funkcja do aktualizacji danych z kolejki (wywoływana w głównym wątku Streamlit) ---
-def update_data_from_mqtt_queue():
-    while not st.session_state.mqtt_queue.empty():
-        data = st.session_state.mqtt_queue.get()
-        print(f"Pobrano z kolejki i aktualizuję UI: {data}")
-        st.session_state.latest_data["temp"] = data.get("temp", st.session_state.latest_data["temp"])
-        st.session_state.latest_data["hum"] = data.get("hum", st.session_state.latest_data["hum"])
-        st.session_state.latest_data["alarm"] = data.get("alarm", st.session_state.latest_data["alarm"])
-        st.session_state.last_update_time = time.strftime("%H:%M:%S")
-    
-    # Po przetworzeniu wszystkich elementów z kolejki, wymuś rerun, aby zaktualizować UI.
-    # Upewnij się, że nie wywołujesz tego zbyt często.
-    # Streamlit może odświeżać się automatycznie, ale dla pewności możemy wymusić.
-    # Ważne: to st.rerun() jest w głównym wątku, więc jest bezpieczne.
-    # Warto dodać opóźnienie lub mechanizm, aby nie odświeżało się co ms.
-    # Na razie zostawimy tak, aby upewnić się, że dane są widoczne.
-    st.rerun()
+# Ta funkcja nie będzie wywoływać st.rerun() bezpośrednio!
+def process_mqtt_queue_for_ui():
+    updated = False
+    while not mqtt_data_queue.empty():
+        try:
+            data = mqtt_data_queue.get_nowait() # Użyj get_nowait() aby nie blokować
+            print(f"Pobrano z kolejki i aktualizuję st.session_state: {data}")
+            st.session_state.latest_data["temp"] = data.get("temp", st.session_state.latest_data["temp"])
+            st.session_state.latest_data["hum"] = data.get("hum", st.session_state.latest_data["hum"])
+            st.session_state.latest_data["alarm"] = data.get("alarm", st.session_state.latest_data["alarm"])
+            st.session_state.last_update_time = time.strftime("%H:%M:%S")
+            updated = True
+        except queue.Empty:
+            break # Kolejka jest pusta
+        except Exception as e:
+            print(f"Błąd podczas przetwarzania kolejki MQTT: {e}")
+            break # Przestań przetwarzać w przypadku błędu
+    return updated # Zwróć, czy coś zostało zaktualizowane
 
 
 # --- 6. Interfejs Streamlit ---
 st.title("🏡 Inteligentny Monitoring Temperatury w Domu")
+
+# Spróbuj przetworzyć dane z kolejki na początku uruchomienia Streamlit
+# Jeśli są nowe dane, Streamlit odświeży się automatycznie (ponownie uruchamiając skrypt)
+if process_mqtt_queue_for_ui():
+    pass # Dane zostały zaktualizowane, Streamlit odświeży się sam
 
 # Wyświetlanie danych w kolumnach
 col1, col2, col3 = st.columns(3)
@@ -126,11 +136,6 @@ st.markdown(f"Ostatnia aktualizacja: **{st.session_state.last_update_time}**")
 # DODAJ WYŚWIETLANIE BŁĘDU MQTT W GŁÓWNYM UI
 if 'mqtt_error' in st.session_state and st.session_state.mqtt_error:
     st.error(st.session_state.mqtt_error)
-else: # Jeśli nie ma błędu, spróbuj pobrać dane z kolejki
-    # Wywołaj funkcję aktualizującą dane. Możesz tu dodać logikę, aby nie robić tego co sekundę,
-    # np. tylko co X sekund, jeśli Streamlit nie odświeża się automatycznie wystarczająco szybko.
-    # Na początek, po prostu wywołamy ją.
-    update_data_from_mqtt_queue()
 
 st.write("---")
 st.subheader("Informacje")
@@ -143,7 +148,16 @@ st.markdown("""
 st.subheader("Sterowanie symulacją (Wokwi)")
 st.write("Zmień temperaturę w symulacji Wokwi (DHT22), aby zobaczyć aktualizacje tutaj.")
 
-if st.button("Odśwież stronę (Wymusza aktualizację)"):
-    # Ten przycisk nadal będzie przydatny, aby ręcznie wymusić odświeżenie UI.
+# Przycisk "Odśwież stronę" jest teraz kluczowy dla ręcznego odświeżania UI
+if st.button("Odśwież stronę (Wymuś aktualizację)"):
+    # Gdy użytkownik naciśnie przycisk, skrypt uruchomi się ponownie.
+    # Wtedy process_mqtt_queue_for_ui() zostanie wywołane ponownie.
     st.rerun()
+
+# Automatyczne odświeżanie (opcjonalne, może zużywać więcej zasobów)
+# Możesz dodać to, jeśli Streamlit nie odświeża się wystarczająco szybko sam.
+# Np. odświeżaj co 5 sekund, jeśli są nowe dane w kolejce.
+# if mqtt_data_queue.qsize() > 0:
+#     time.sleep(1) # Daj czas na zebranie danych w kolejce
+#     st.rerun()
 
