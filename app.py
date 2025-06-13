@@ -4,15 +4,19 @@ import os
 import json
 import time
 
+# To musi być pierwsza instrukcja Streamlit w całym skrypcie!
 st.set_page_config(page_title="Inteligentny Monitoring Temperatury", layout="centered", icon="🌡️")
 
+# --- 1. Konfiguracja MQTT z zmiennych środowiskowych ---
+# Te zmienne zostaną automatycznie wypełnione wartościami z Streamlit Secrets
+# jeśli je tam ustawiono.
 MQTT_BROKER = os.getenv("MQTT_BROKER")
-MQTT_PORT = int(os.getenv("MQTT_PORT", 8883))
+MQTT_PORT = int(os.getenv("MQTT_PORT", 8883)) # Upewnij się, że to 8883 dla SSL
 MQTT_USERNAME = os.getenv("MQTT_USERNAME")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
-MQTT_TOPIC = "home/monitor/data"
+MQTT_TOPIC = "home/monitor/data" # Temat, na który ESP32 wysyła JSON
 
-# Zmienne do przechowywania danych z MQTT
+# --- 2. Zmienne do przechowywania danych z MQTT (używamy st.session_state do persystencji w Streamlit) ---
 if 'latest_data' not in st.session_state:
     st.session_state.latest_data = {
         "temp": "Łączę...",
@@ -20,16 +24,17 @@ if 'latest_data' not in st.session_state:
         "alarm": "Łączę..."
     }
     st.session_state.last_update_time = "N/A"
+    st.session_state.mqtt_error = None # DODAJ TĘ LINIĘ
 
-
+# --- 3. Funkcje MQTT Callback ---
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
         print("Połączono z brokerem MQTT!")
         client.subscribe(MQTT_TOPIC)
-        
+        # st.success("Połączono z brokerem MQTT!") # Komentujemy, aby uniknąć błędów UI w callbacku
     else:
         print(f"Błąd połączenia z MQTT: {rc}. Spróbuję ponownie...")
-        
+        # st.error(f"Błąd połączenia z MQTT: {rc}. Spróbuję ponownie...") # Komentujemy
 
 def on_message(client, userdata, msg):
     try:
@@ -43,7 +48,6 @@ def on_message(client, userdata, msg):
         st.session_state.latest_data["alarm"] = data.get("alarm", st.session_state.latest_data["alarm"])
         st.session_state.last_update_time = time.strftime("%H:%M:%S")
 
-        
         st.rerun() # Wymusza ponowne uruchomienie skryptu i odświeżenie UI
 
     except json.JSONDecodeError:
@@ -51,10 +55,15 @@ def on_message(client, userdata, msg):
     except Exception as e:
         print(f"Inny błąd w on_message: {e}")
 
-# --- 4. Inicjalizacja Klienta MQTT (z użyciem st.experimental_singleton) ---
+# --- 4. Inicjalizacja Klienta MQTT (z użyciem st.cache_resource) ---
 @st.cache_resource
 def get_mqtt_client():
     client = mqtt.Client()
+    # Sprawdź, czy zmienne środowiskowe są dostępne przed próbą ich użycia
+    if not all([MQTT_USERNAME, MQTT_PASSWORD, MQTT_BROKER, MQTT_PORT]):
+        st.session_state.mqtt_error = "Brak wszystkich danych uwierzytelniających MQTT. Upewnij się, że są ustawione w Streamlit Secrets."
+        return None # Zwróć None, jeśli brakuje danych
+        
     client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
     client.on_connect = on_connect
     client.on_message = on_message
@@ -66,18 +75,19 @@ def get_mqtt_client():
         client.connect(MQTT_BROKER, MQTT_PORT, 60)
         client.loop_start() # Uruchom pętlę w tle do nasłuchiwania
         print("MQTT client started in background loop.")
+        st.session_state.mqtt_error = None # Zresetuj błąd, jeśli połączenie się powiodło
     except Exception as e:
-        st.error(f"Nie udało się połączyć z brokerem MQTT: {e}. Sprawdź konfigurację.")
+        # Zapisz błąd w session_state, żeby wyświetlić go w UI
+        st.session_state.mqtt_error = f"Nie udało się połączyć z brokerem MQTT: {e}. Sprawdź konfigurację."
+        print(f"Błąd połączenia MQTT w get_mqtt_client: {e}")
     return client
 
 mqtt_client = get_mqtt_client()
 
-
-
-
+# --- 5. Interfejs Streamlit ---
 st.title("🏡 Inteligentny Monitoring Temperatury w Domu")
 
-
+# Wyświetlanie danych w kolumnach
 col1, col2, col3 = st.columns(3)
 
 with col1:
@@ -97,6 +107,10 @@ with col3:
 
 st.markdown(f"Ostatnia aktualizacja: **{st.session_state.last_update_time}**")
 
+# DODAJ WYŚWIETLANIE BŁĘDU MQTT W GŁÓWNYM UI
+if 'mqtt_error' in st.session_state and st.session_state.mqtt_error:
+    st.error(st.session_state.mqtt_error)
+
 st.write("---")
 st.subheader("Informacje")
 st.markdown("""
@@ -108,4 +122,4 @@ st.markdown("""
 st.subheader("Sterowanie symulacją (Wokwi)")
 st.write("Zmień temperaturę w symulacji Wokwi (DHT22), aby zobaczyć aktualizacje tutaj.")
 
-st.button("Odśwież stronę") 
+st.button("Odśwież stronę")
