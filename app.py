@@ -5,7 +5,7 @@ import json
 import time
 
 # To musi być pierwsza instrukcja Streamlit w całym skrypcie!
-st.set_page_config(page_title="Inteligentny Monitoring Temperatury", layout="centered", icon="🌡️")
+st.set_page_config(page_title="Inteligentny Monitoring Temperatury", layout="centered")
 
 # --- 1. Konfiguracja MQTT z zmiennych środowiskowych ---
 # Te zmienne zostaną automatycznie wypełnione wartościami z Streamlit Secrets
