@@ -9,10 +9,10 @@ st.set_page_config(page_title="Inteligentny Monitoring Temperatury", layout="cen
 
 # Konfiguracja MQTT z zmiennych środowiskowych
 MQTT_BROKER = os.getenv("MQTT_BROKER")
-MQTT_PORT = int(os.getenv("MQTT_PORT", 8883))
+MQTT_PORT = os.getenv("MQTT_PORT")
 MQTT_USERNAME = os.getenv("MQTT_USERNAME")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
-MQTT_TOPIC = "home/monitor/data" 
+MQTT_TOPIC = os.getenv("MQTT_TOPIC")
 
 # Zmienne do przechowywania danych z MQTT
 if 'latest_data' not in st.session_state:
