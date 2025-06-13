@@ -4,6 +4,8 @@ import os
 import json
 import time
 
+st.set_page_config(page_title="Inteligentny Monitoring Temperatury", layout="centered", icon="🌡️")
+
 MQTT_BROKER = os.getenv("MQTT_BROKER")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 8883))
 MQTT_USERNAME = os.getenv("MQTT_USERNAME")
@@ -71,7 +73,7 @@ def get_mqtt_client():
 mqtt_client = get_mqtt_client()
 
 
-st.set_page_config(page_title="Inteligentny Monitoring Temperatury", layout="centered", icon="🌡️")
+
 
 st.title("🏡 Inteligentny Monitoring Temperatury w Domu")
 
