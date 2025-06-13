@@ -50,7 +50,7 @@ def on_message(client, userdata, msg):
         print(f"Inny błąd w on_message: {e}")
 
 # --- 4. Inicjalizacja Klienta MQTT (z użyciem st.experimental_singleton) ---
-@st.experimental_singleton
+@st.cache_resource
 def get_mqtt_client():
     client = mqtt.Client()
     client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
